@@ -1,0 +1,375 @@
+import requests 
+from stapi import market_api_key
+import json
+import functools
+import logging
+import shelve
+import webbrowser
+import schedule
+import websocket
+import time
+
+logger = logging.getLogger("")
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("schedule").setLevel(logging.WARNING)
+logger.setLevel(logging.DEBUG)
+handler = logging.FileHandler("logs.log")
+formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
+messages_stack = []
+chprices = {"items": {"gid": ["3439", "1523", "1402", "2526", "2181", "2122", "1524", "2484", "1503", "1527","2499"]}}
+key = {"items": {"gid": ["1402"]}}
+
+
+# Запросы на обмены
+def response_of_trade():
+    response_steamtrader = requests.get(
+        "https://api.steam-trader.com/exchange/?key={}".format(market_api_key)
+    )  # отправляю запрос на получение трейда
+    response_steamtrader_json = response_steamtrader.json()
+    print(response_steamtrader_json)
+
+
+# Запрос на обновление инветаря
+def inventory_update():
+    response_steamtrader_inventory = requests.get(
+        "https://api.steam-trader.com/updateinventory/?key={}&gameid=440".format(
+            market_api_key
+        )
+    )
+    response_steamtrader_inventory_json = response_steamtrader_inventory.json()
+    print(response_steamtrader_inventory_json)
+
+
+def get_userbalance():  # баланс пользователя и выставление ключей
+
+    response_steamtrader_balance = requests.get(
+        "https://api.steam-trader.com/getbalance/?key={}".format(market_api_key)
+    )
+    response_steamtrader_balance_json = response_steamtrader_balance.json()
+
+    success_steamtrader_balance_json = response_steamtrader_balance_json.get(
+        "success", ""
+    )
+    if success_steamtrader_balance_json:  # если ответ success
+        balance = response_steamtrader_balance_json["balance"]
+        print(f" Баланс {float(balance)} руб.")
+# ЗДЕСЬ НАЧИНАЕТСЯ ЕБЛЯ С ВЫСТАВЛЕНИЕМ КЛЮЧЕЙ   
+    if float(balance) > 150:
+        pricecfg = key  # закинул данные в переменую
+        items = pricecfg["items"]  # инфа цифр из строки items
+        gidNumbers = items["gid"]
+        edit_data = {"gameid": str("440"), "type": str("buy")}
+        requests.post(
+            f"https://api.steam-trader.com/getdownorders/?key={market_api_key}",
+            data=edit_data,
+            ).json()
+        for (
+            gidNum
+        ) in (
+            gidNumbers
+        ):  # проходимся по всем элементам массива items["gid"], с помощью цикла for in
+            print(gidNum)
+            # time.sleep(3)  # спим 3 секунды
+            response_steamtrader_itemprices = requests.get(
+                "https://api.steam-trader.com/iteminfo/?key={}&gid={}".format(
+                    market_api_key, gidNum
+                )
+            )
+            response_steamtrader_itemprices_json = (
+                response_steamtrader_itemprices.json()
+            )
+
+            success_steamtrader_itemprices_json = (
+                response_steamtrader_itemprices_json.get("success", "")
+            )
+            if success_steamtrader_itemprices_json:
+                market_name = response_steamtrader_itemprices_json[
+                    "name"
+                ]  # steamtrader имя предмета
+                market_priceorder = response_steamtrader_itemprices_json["buy_price"]
+            if market_priceorder < 148:
+                price = market_priceorder + 0.01
+                count = float(balance) // price
+                edit_data = {"gid": str("1402"), "price": str(price), "count": str(count)}
+                if count >= 1:
+                    requests.post(
+                        f"https://api.steam-trader.com/createbuyorder/?key={market_api_key}",
+                        data=edit_data,
+                    ).json()
+                    print(
+                f"Заявка на {str(market_name)} в количестве {count} по цене {price} выставенна.")
+            if market_priceorder > 148:
+                price = 148.2
+                count = float(balance) // price
+                edit_data = {"gid": str("1402"), "price": str(price), "count": str(count)}
+                if count >= 1:
+                    requests.post(
+                        f"https://api.steam-trader.com/createbuyorder/?key={market_api_key}",
+                        data=edit_data,
+                    ).json()
+                    print(
+                f"Заявка на {str(market_name)} в количестве {count} по цене {price} выставенна.")        
+    else:
+        pass
+        
+           
+                
+
+
+# Открываю файл, чекаю предметы
+def get_iteminfo():
+    pricecfg = chprices  # закинул данные в переменую
+    items = pricecfg["items"]  # инфа цифр из строки items
+    gidNumbers = items["gid"]
+    for (
+        gidNum
+    ) in (
+        gidNumbers
+    ):  # проходимся по всем элементам массива items["gid"], с помощью цикла for in
+        print(gidNum)
+        # time.sleep(3)  # спим 3 секунды
+        response_steamtrader_itemprices = requests.get(
+            "https://api.steam-trader.com/iteminfo/?key={}&gid={}".format(
+                market_api_key, gidNum
+            )
+        )
+        response_steamtrader_itemprices_json = (
+            response_steamtrader_itemprices.json()
+        )
+
+        success_steamtrader_itemprices_json = (
+            response_steamtrader_itemprices_json.get("success", "")
+        )
+        if success_steamtrader_itemprices_json:
+            market_name = response_steamtrader_itemprices_json[
+                "name"
+            ]  # steamtrader имя предмета
+            market_priceorder = response_steamtrader_itemprices_json["buy_price"]
+            offer1 = response_steamtrader_itemprices_json["market_price"]
+        try:
+            print(f"Название предмета: {str(market_name)}.")
+            print(f"Минимальная цена продажи на сайте: {float(offer1)} Rub.")
+            print(
+                f"Максимальная цена заявки на покупку: {float(market_priceorder)} Rub."
+            )
+        except:
+            pass
+
+
+# Вкуснятина от нейросетки которая меняет все предметы на 1
+def edit_items_price():
+    response_now_steam_trader_inv = requests.get(
+        "https://api.steam-trader.com/getinventory/?key={}&gameid=440&status[0]".format(
+            market_api_key
+        )
+    )
+    response_now_steam_trader_inv_json = response_now_steam_trader_inv.json()
+    full_items = response_now_steam_trader_inv_json["items"]
+    gid_price_map = {}  # Добавлено: словарь для хранения цен по gid
+    position_map = {}
+    for dict in full_items:
+        if dict["status"] == 0:
+            item_id = dict["id"]
+            item_gid = dict["gid"]
+            item_price = dict["price"]
+            response_steamtrader_itemprices = requests.get(
+                "https://api.steam-trader.com/iteminfo/?key={}&gid={}".format(
+                    market_api_key, item_gid
+                )
+            )
+            # Нужна проверка на позицию
+            response_steamtrader_itemprices_json = (
+                response_steamtrader_itemprices.json()
+            )
+            market_priceorder = response_steamtrader_itemprices_json["market_price"]
+            if market_priceorder == item_price:
+                continue
+            else:
+                new_price = market_priceorder - 0.01
+            if item_gid in gid_price_map:
+                new_price = gid_price_map[item_gid]
+            else:
+                gid_price_map[item_gid] = new_price
+            item_id_4_edit = item_id
+            edit_data = {"id": str(item_id_4_edit), "price": str(new_price)}
+            requests.post(
+                f"https://api.steam-trader.com/editprice/?key={market_api_key}",
+                data=edit_data,
+                ).json()
+            market_name = response_steamtrader_itemprices_json["name"]
+            print(
+                f"Цена предмета {str(market_name)} изменена на {new_price}"
+            )  # Добавлено: вывод изменения цены
+
+
+# Продажа предмета
+def count_and_selling_items():
+    count_of_item = 0
+    gid_price_map = {}  # Dictionary for storing prices by gid
+    response_now_steam_trader_inv = requests.get(
+        "https://api.steam-trader.com/getinventory/?key={}&gameid=440&status[0]".format(
+            market_api_key
+        )
+    )
+    response_now_steam_trader_inv_json = response_now_steam_trader_inv.json()
+    now_items = response_now_steam_trader_inv_json["items"]
+    items = chprices["items"]
+    gids = items["gid"]
+
+    for gid in gids:
+        response_steamtrader_itemprices = requests.get(
+            "https://api.steam-trader.com/iteminfo/?key={}&gid={}".format(
+                market_api_key, gid
+            )
+        )
+        response_steamtrader_itemprices_json = response_steamtrader_itemprices.json()
+
+        success_steamtrader_itemprices_json = response_steamtrader_itemprices_json.get(
+            "success", ""
+        )
+        if success_steamtrader_itemprices_json:
+            market_name = response_steamtrader_itemprices_json["name"]
+            market_priceorder = response_steamtrader_itemprices_json["market_price"]
+        count_filtered = [x for x in now_items if x["gid"] == int(gids[count_of_item])]
+        print(f"{str(market_name)}, общее количество: {len(count_filtered)}")
+        count_filtered_stat = [
+            x
+            for x in now_items
+            if x["status"] == 0 and x["gid"] == int(gids[count_of_item])
+        ]
+        print(f"{str(market_name)}, количество в продаже: {len(count_filtered_stat)}")
+        selling = [
+            x
+            for x in now_items
+            if x["status"] == -2 and x["gid"] == int(gids[count_of_item])
+        ]
+        # Допилить нужно здесь !!!! внизу
+        print(f"{str(market_name)}, количество на продажу: {len(selling)}")
+        '''if (
+            len(count_filtered) > 3
+            and len(count_filtered_stat) < 3
+            and len(selling) > 0
+        ):
+            count = 3 - len(count_filtered_stat)
+            selling = selling[:count]'''
+        for dict in selling:
+            item_id = dict["itemid"]
+            item_gid = dict["gid"]
+            item_assetid = dict["assetid"]
+            new_price = market_priceorder - 0.01
+            # Добавлено: проверка, есть ли уже цена для этого gid
+            if item_gid in gid_price_map:
+                new_price = gid_price_map[item_gid]
+            else:
+                gid_price_map[item_gid] = new_price
+            item_id_4_sale = item_id
+            edit_data = {
+                "itemid": str(item_id_4_sale),
+                "assetid": str(item_assetid),
+                "price": str(new_price),
+            }
+            if item_gid == 3439 and new_price > 80:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 1523 and (new_price) > 9:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+                ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}") 
+            if item_gid == 1402 and new_price > 164:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 2526 and new_price > 38:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}") 
+            if item_gid == 2181 and new_price > 43:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 2122 and new_price > 40:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 1524 and new_price > 10:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 2484 and new_price > 12:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 1503 and new_price > 330:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 1527 and new_price > 57:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")
+            if item_gid == 2499 and new_price > 500:
+                requests.post(
+                    f"https://api.steam-trader.com/sale/?key={market_api_key}",
+                    data=edit_data,
+            ).json()
+                print(f"{str(market_name)}, высытавлен за : {new_price}")                                            
+        count_of_item += 1
+        if len(count_filtered) == 0:
+            print(f"КУПИ, DONT ВАФЛИ ---> {str(market_name)}")
+
+
+def print_time():
+    print(time.strftime("%d/%m/%Y, %H:%M:%S", time.localtime()))
+
+
+def market_scheduler():
+    response_of_trade()
+    inventory_update()
+    get_userbalance()
+    get_iteminfo()
+    count_and_selling_items()
+    edit_items_price()
+    print_time()
+
+    schedule.every(2).minutes.do(print_time)
+
+    schedule.every(180).seconds.do(get_iteminfo)
+
+    schedule.every(180).seconds.do(inventory_update)
+
+    schedule.every(180).seconds.do(count_and_selling_items)
+
+    schedule.every(180).seconds.do(edit_items_price)
+
+    schedule.every(180).seconds.do(response_of_trade)
+
+    schedule.every(180).seconds.do(get_userbalance)
+    
+    while True:
+        schedule.run_pending()
+
+
+market_scheduler()
